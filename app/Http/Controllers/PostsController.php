@@ -8,6 +8,18 @@ use DB;
 
 class PostsController extends Controller
 {
+
+    /**
+     * Create a new controller instance.
+     *
+     * @return void
+     */
+    public function __construct()
+    {
+        // Check for correct user
+        $this->middleware('auth', ['except' => ['index', 'show']]);
+    }
+
     /**
      * Display a listing of the resource.
      *
@@ -34,23 +46,58 @@ class PostsController extends Controller
         return view('posts.create');
     }
 
-    /**
-     * Store a newly created resource in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response
-     */
+    protected function saveCoverImage(Request $request, $id=-1) {
+
+        $this->deleteExistingCoverImage($id);
+
+        // Handle image upload if any
+        $fileNameToStore = 'noimage.jpg';
+        if($request->hasFile('cover_image')) {
+            $fileNameWithExt = $request->file('cover_image')->getClientOriginalName();
+
+            // get just file name    
+            $filename = pathinfo($fileNameWithExt, PATHINFO_FILENAME);
+            // get just file ext
+            $extension = $request->file('cover_image')->getClientOriginalExtension();
+            $fileNameToStore = $filename.'_'.time().'.'.$extension;
+            $path = $request->file('cover_image')->storeAs('public/cover_images', $fileNameToStore);
+            
+        }
+        return $fileNameToStore;
+    }
+
+
+    protected function deleteExistingCoverImage($id) {
+
+        // if this is an existing post and already has a cover image, 
+        // delete the existing image first
+
+        if($id != -1) {
+            $post = Post::find($id);
+            $fileToDelete = $post->cover_image;
+            if($fileToDelete != 'noimage.jpg') {
+                if (file_exists('public/cover_images/'.$fileToDelete)) {
+                    File::delete('public/cover_images/'.$fileToDelete);
+                }
+            }
+        }
+    }
+
+
     public function store(Request $request)
     {
         $this->validate($request, [
             'title' => 'required',
-             'body' => 'required'
+             'body' => 'required',
+             'cover_image' => 'image|nullable|max:1999'
         ]);
 
+        $fileNameToStore = $this->saveCoverImage($request);
         $post = new Post;
         $post->title = $request->input('title');
         $post->body = $request->input('body');
         $post->user_id = auth()->user()->id;
+        $post->cover_image = $fileNameToStore;
         $post->save();
 
         return redirect('/posts')->with('success', 'Post Created');
@@ -77,6 +124,12 @@ class PostsController extends Controller
     public function edit($id)
     {
         $post = Post::find($id);
+
+        // Check for correct user
+        if(auth()->user()->id != $post->user_id) {
+            return redirect('/posts')->with('error', 'You are not authorized to access this page.');
+        }
+
         return view('posts.edit')->with('post', $post);
 
     }
@@ -95,9 +148,12 @@ class PostsController extends Controller
              'body' => 'required'
         ]);
 
+        $fileNameToStore = $this->saveCoverImage($request, $id);
+
         $post = Post::find($id);
         $post->title = $request->input('title');
         $post->body = $request->input('body');
+        $post->cover_image = $fileNameToStore;
         $post->save();
 
         return redirect('/posts')->with('success', 'Post Updated');
@@ -111,7 +167,14 @@ class PostsController extends Controller
      */
     public function destroy($id)
     {
+        $this->deleteExistingCoverImage($id);
         $post = Post::find($id);
+
+        // Check for correct user
+        if(auth()->user()->id != $post->user_id) {
+            return redirect('/posts')->with('error', 'You are not authorized to access this page.');
+        }
+
         $post->delete();
 
         return redirect('/posts')->with('success', 'Post Deleted');
